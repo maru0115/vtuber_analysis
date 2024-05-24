@@ -1,3 +1,6 @@
 .venv
-.Rproj.user
 .git
+
+.Rproj.user
+.RData
+.Rhistory
