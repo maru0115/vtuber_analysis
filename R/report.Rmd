@@ -1,0 +1,133 @@
+---
+title: "個人勢Vtuberデータセットの解析"
+output: html_notebook
+---
+
+# ライブラリの読み込み
+```{r}
+library(tidyverse)
+library(corrplot)
+library(stargazer)
+library(car)
+library(broom)
+```
+
+# データの読み込み
+
+```{r}
+data_livers = read_csv("../csv/livers_info.csv")
+data_videos = read_csv("../csv/videos_info.csv")
+```
+
+```{r}
+data_livers = read_csv("../csv/livers_info.csv")
+```
+
+```{r}
+data_videos_summary <-
+  data_videos %>% 
+  group_by(channelId, video_type) %>%
+  summarise(count=n(), sum=sum(viewCount), median=median(viewCount), max=max(viewCount), .groups = "drop") %>% 
+  pivot_wider(names_from=video_type, values_from=c(count, sum, median, max), values_fill = 0)
+```
+
+```{r}
+data_result <-
+  data_livers %>% 
+  inner_join(data_videos_summary, by="channelId") %>% 
+  select(title, subscriberCount, ends_with("movie"), ends_with("live"), ends_with("short"))
+```
+
+```{r}
+data_result
+```
+
+# 登録者数と同接の関係
+```{r}
+data_result %>% 
+  ggplot(
+    aes(
+      x = subscriberCount,
+      y = median_live
+    )
+  ) +
+  geom_point() # +
+  #xlim(0,1000) +
+  #ylim(0,200)
+```
+
+# 登録者をに絞って見てみる
+```{r}
+data_result2 <-
+  data_result %>% filter(subscriberCount <= 500)
+```
+
+# 同接のヒストグラム
+```{r}
+data_result2 %>% 
+  ggplot(
+    aes(
+      x = median_live
+    )
+  ) +
+  geom_histogram()
+```
+# short動画本数のヒストグラム
+```{r}
+data_result2 %>% 
+  ggplot(
+    aes(
+      x = count_short
+    )
+  ) +
+  geom_histogram()
+```
+
+```{r}
+# 相関係数の一覧
+c<-
+  data_result2 %>%
+  select(-title) %>%
+  cor(use="pairwise.complete.obs")
+
+p<-
+  data_result2 %>%
+  select(-title) %>%
+  cor.mtest(use="pairwise.complete.obs")
+
+round(c,2)　#「c」の中の数値を小数点以下3桁で四捨五入する
+corrplot(c, type="upper", tl.col="black",tl.cex=1.0,tl.srt=45,p.mat=p[[1]],insig="blank",sig.level=0.0)
+#corrplot(c, type="upper")
+```
+
+# 重回帰分析してみる
+
+```{r}
+reg = lm(subscriberCount ~ count_live + count_movie + count_short, data_result2)
+step(reg)
+```
+
+# 多重共線性(VIF>10かどうかで判別)
+```{r}
+vif(reg)
+```
+# Q-Qプロット
+
+```{r}
+reg %>% 
+  augment() %>% 
+  mutate(z_res = (.resid - mean(.resid)) / sd(.resid)) %>% 
+  ggplot(aes(sample = z_res)) +
+  geom_abline(a = 0, b = 1, linetype = 2, color = "red") +
+  geom_qq()
+```
+
+
+
+
+
+
+
+
+
+
