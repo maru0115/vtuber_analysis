@@ -1,0 +1,679 @@
+---
+title: "個人VTuber分析レポート"
+author: "まる"
+date: "2024年5月27日"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    md_extentions: NULL
+    code_folding: "hide"
+    number_section: true
+---
+
+```{r ,include=FALSE}
+# ライブラリの読み込み
+library(car)
+library(tidyverse)
+
+# データの読み込み
+data_livers        = read_csv("../csv/livers_info.csv", quote = '"')   %>% distinct
+data_videos        = read_csv("../csv/videos_info.csv", quote = '"')   %>% distinct
+data_customer      = read_csv("../csv/customer.csv", quote = '"')      %>% distinct
+data_gender        = read_csv("../csv/gender.csv", quote = '"')        %>% distinct
+data_genre         = read_csv("../csv/genre.csv", quote = '"')         %>% distinct
+data_model         = read_csv("../csv/model.csv", quote = '"')         %>% distinct
+data_collabo       = read_csv("../csv/collabo.csv", quote = '"')       %>% distinct
+```
+
+# 各特徴量ごとの活動人数
+
+## 性別
+```{r}
+data_gender %>% 
+  pivot_longer(
+    cols = -"channelId",
+    names_to = "feature"
+  ) %>%
+  ggplot(
+    aes(
+      x = feature %>% reorder(-value),
+      y = value
+    )
+  ) +
+  geom_bar(stat="identity") +
+  xlab("性別") +
+  ylab("配信者数")
+```
+
+## モデル
+```{r}
+data_model %>% 
+  pivot_longer(
+    cols = -"channelId",
+    names_to = "feature"
+  ) %>%
+  ggplot(
+    aes(
+      x = feature %>% reorder(-value),
+      y = value
+    )
+  ) +
+  geom_bar(stat="identity") +
+  xlab("モデル") +
+  ylab("配信者数")
+```
+
+## ジャンル
+```{r}
+data_genre %>% 
+  pivot_longer(
+    cols = -"channelId",
+    names_to = "feature"
+  ) %>%
+  ggplot(
+    aes(
+      x = feature %>% reorder(-value),
+      y = value
+    )
+  ) +
+  geom_bar(stat="identity") +
+  theme(
+    axis.text.x = element_text(angle = 90)
+  ) +
+  xlab("ジャンル") +
+  ylab("配信者数")
+```
+
+## 得意なこと
+```{r}
+data_customer %>% 
+  pivot_longer(
+    cols = -"channelId",
+    names_to = "feature"
+  ) %>%
+  ggplot(
+    aes(
+      x = feature %>% reorder(-value),
+      y = value
+    )
+  ) +
+  geom_bar(stat="identity") +
+  theme(
+    axis.text.x = element_text(angle = 90)
+  ) +
+  xlab("得意なこと") +
+  ylab("配信者数")
+```
+## コラボ希望度
+```{r}
+data_collabo %>% 
+  ggplot(
+    aes(
+      x = collabo_level
+    )
+  ) +
+  geom_bar(stat="count") +
+  xlab("コラボ期待度") +
+  ylab("配信者数")
+```
+
+# 各特徴ごとのチャンネル登録者数
+
+　
+```{r}
+## subscriberCountを対数変換したデータフレームを用意
+data_livers_log <-
+  data_livers %>% 
+  filter(subscriberCount >=100) %>% 
+  mutate(log_subscriberCount = subscriberCount %>% log(10)) %>% 
+  select(channelId, log_subscriberCount)
+```
+
+
+## 性別
+
+```{r}
+### 対数変換後
+data_livers_log %>% 
+  inner_join(data_gender, by="channelId") %>% 
+  select(-channelId) %>% 
+  pivot_longer(-log_subscriberCount, names_to = "gender") %>% 
+  filter(value==1) %>% 
+  ggplot(
+    aes(
+      x = gender,
+      y = log_subscriberCount
+    )
+  ) + 
+  geom_boxplot() +
+  xlab("性別") +
+  ylab("チャンネル登録者")
+```
+```{r ,include=FALSE}
+### 対数変換前
+data_livers %>% 
+  select(channelId, subscriberCount) %>% 
+  filter(
+    subscriberCount>=100,
+    subscriberCount<=10000
+  ) %>% 
+  inner_join(data_gender, by="channelId") %>% 
+  select(-channelId) %>% 
+  pivot_longer(-subscriberCount, names_to = "gender") %>% 
+  filter(value==1) %>% 
+  ggplot(
+    aes(
+      x = gender,
+      y = subscriberCount
+    )
+  ) + 
+  geom_boxplot()
+```
+
+## チャンネル登録者に男女差はあるか
+
+```{r}
+### 対数変換後
+
+data_test1 <-
+  data_livers_log %>% 
+  inner_join(data_gender, by="channelId") %>% 
+  select(-channelId) %>% 
+  pivot_longer(-log_subscriberCount, names_to = "gender") %>% 
+  filter(value==1)
+
+t.test(
+  data_test1 %>% filter(gender=="gender_male") %>% select(log_subscriberCount),
+  data_test1 %>% filter(gender=="gender_female") %>% select(log_subscriberCount),
+  var.equal=F,
+  paired=F
+)
+```
+- 男女で優劣は見られない(ただしバ美肉は不利)
+
+```{r, include=FALSE}
+### 対数変換前
+
+data_test1 <-
+  data_livers %>% 
+  select(channelId, subscriberCount) %>% 
+  inner_join(data_gender, by="channelId") %>% 
+  select(-channelId) %>% 
+  pivot_longer(-subscriberCount, names_to = "gender") %>% 
+  filter(value==1)
+
+t.test(
+  data_test1 %>% filter(gender=="gender_male") %>% select(subscriberCount),
+  data_test1 %>% filter(gender=="gender_female") %>% select(subscriberCount),
+  var.equal=F,
+  paired=F
+)
+```
+```{r, include=FALSE}
+## 得意なこと
+
+data_livers_log %>% 
+  inner_join(data_customer, by="channelId") %>% 
+  select(-channelId) %>% 
+  pivot_longer(-log_subscriberCount, names_to = "customer") %>% 
+  filter(value==1) %>% 
+  ggplot(
+    aes(
+      x = customer,
+      y = log_subscriberCount
+    )
+  ) + 
+  geom_boxplot() +
+  theme(
+    axis.text.x = element_text(angle = 90)
+  )
+```
+
+
+# ジャンルのクラスタ分け
+
+## 最適なクラスタ数を決める
+
+### BIC
+```{r}
+kmeansAIC <- function(fit){
+  
+  m <- ncol(fit$centers)
+  n <- length(fit$cluster)
+  k <- nrow(fit$centers)
+  D <- fit$tot.withinss
+  return(data.frame(AIC = D + 2*m*k,
+                    BIC = D + log(n)*m*k))
+}
+
+d <- data_genre %>% select(starts_with("genre")) 
+res <- c()
+for (i in 2:15){
+  fit <- kmeans(d, i)
+  tmp <- kmeansAIC(fit)
+  res <- rbind(res, cbind(tmp, i))
+}
+print(res)
+```
+
+### エルボー図
+```{r}
+k.max <- 15
+wss <- sapply(1:k.max, 
+              function(k){kmeans(d, k, nstart = 50, iter.max = 15)$tot.withinss})
+plot(1:k.max, wss,
+     type="b", pch = 19, frame = FALSE, 
+     xlab="Number of clusters K",
+     ylab="Total within-clusters sum of squares")
+```
+### 階層クラスター分析
+```{r}
+result <- hclust(dist(d), method = "ward.D2")
+plot(as.dendrogram(result))
+rect.hclust(result, k = 5)
+```
+
+## クラスタリングの実施
+
+```{r}
+cluster = cutree(result, k=5)
+
+data_genre %>% 
+  select(starts_with("genre")) %>% 
+  mutate(cluster = cluster) %>% 
+  pivot_longer(
+    cols = -cluster,
+    names_to = "feature"
+  ) %>% 
+  group_by(cluster, feature) %>%
+  summarize(mean=mean(value)) %>% 
+  ggplot(
+    aes(
+      x = feature,
+      y = mean
+    )
+  ) +
+  geom_bar(stat="identity") +
+  theme(
+    axis.text.x = element_text(angle = 90)
+  ) +
+  facet_grid(
+    cluster ~ .
+  )
+```
+
+### 結果の解釈
+- k = 2
+  - ゲーム特化
+  - その他
+- k = 3
+  - ゲーム特化
+  - お絵かき、麻雀、TRPG
+  - その他
+- k = 4
+  - ゲーム特化
+  - お絵かき、麻雀、TRPG
+  - 歌・音楽
+  - その他
+- k = 5 (一番解釈しやすい)
+  - ゲーム特化
+  - お絵かき
+  - 歌・音楽
+  - コラボ
+  - 雑談・ゲーム
+
+
+```{r, include=FALSE}
+### ジャンルのクラスタを保存
+f_cluster_name <- function(cluster_num){
+  if(cluster_num == 1){
+    return("1:雑談・ゲーム")
+  }else if(cluster_num == 2){
+    return("2:ゲーム特化")
+  }else if(cluster_num == 3){
+    return("3:歌・音楽")
+  }else if(cluster_num == 4){
+    return("4:お絵かき")
+  }else{
+    return("5:コラボ")
+  }
+}
+
+#data_genre %>% 
+#  mutate(cluster = sapply(cluster,f_cluster_name)) %>% 
+#  write_csv("../csv/genre_cluster.csv")
+```
+
+# ジャンルクラスタの解析
+
+```{r, include=FALSE}
+## ジャンルデータの読み込み
+data_genre = read_csv("../csv/genre_cluster.csv", quote = '"') %>% distinct
+```
+
+## 各ジャンルの活動者数
+
+```{r}
+data_genre %>% 
+  ggplot(
+    aes(
+      x = cluster
+    )
+  ) +
+  geom_bar(stat="count") +
+  xlab("クラスタ") +
+  ylab("配信者数")
+```
+
+## 各ジャンルごとのチャンネル登録者数
+
+```{r}
+data_livers %>% 
+  inner_join(data_genre, by="channelId") %>% 
+  ggplot(
+    aes(
+      x = cluster,
+      y = subscriberCount %>% log(10)
+    )
+  ) +
+  geom_boxplot() +
+  xlab("クラスタ") +
+  ylab("チャンネル登録者(対数)")
+```
+
+## 各ジャンルごとのコラボ希望度
+
+### コラボ「5」登録率
+```{r}
+data_genre %>% 
+  left_join(data_collabo, by="channelId") %>% 
+  mutate(collabo_registration = ifelse(is.na(collabo_level)|(collabo_level<=4),0,1)) %>% 
+  select(cluster, collabo_registration) %>% 
+  group_by(cluster) %>% 
+  summarise(collabo_registration=mean(collabo_registration)) %>% 
+  ggplot(
+    aes(
+      x = cluster,
+      y = collabo_registration
+    )
+  ) +
+  geom_bar(stat="identity")
+```
+
+# 得意なことのクラスタ分け
+
+## 最適なクラスタ数を決める
+
+### BIC
+```{r}
+kmeansAIC <- function(fit){
+  
+  m <- ncol(fit$centers)
+  n <- length(fit$cluster)
+  k <- nrow(fit$centers)
+  D <- fit$tot.withinss
+  return(data.frame(AIC = D + 2*m*k,
+                    BIC = D + log(n)*m*k))
+}
+
+d <- data_customer %>% select(starts_with("customer")) 
+res <- c()
+for (i in 2:15){
+  fit <- kmeans(d, i)
+  tmp <- kmeansAIC(fit)
+  res <- rbind(res, cbind(tmp, i))
+}
+print(res)
+```
+
+### 階層クラスター分析
+```{r}
+result <- hclust(dist(d), method = "ward.D2")
+plot(as.dendrogram(result))
+rect.hclust(result, k = 5)
+```
+
+## クラスタリングの実施
+
+```{r}
+cluster = cutree(result, k=5)
+
+data_customer %>% 
+  select(starts_with("customer")) %>% 
+  mutate(cluster = cluster) %>% 
+  pivot_longer(
+    cols = -cluster,
+    names_to = "feature"
+  ) %>% 
+  group_by(cluster, feature) %>%
+  summarize(mean=mean(value)) %>% 
+  ggplot(
+    aes(
+      x = feature,
+      y = mean
+    )
+  ) +
+  geom_bar(stat="identity") +
+  theme(
+    axis.text.x = element_text(angle = 90)
+  ) +
+  facet_grid(
+    cluster ~ .
+  )
+```
+### 結果の解釈
+- k=2
+  - 企画・お笑い
+  - 一般的
+- k=3
+  - 企画・お笑い・トーク
+  - イラスト・2Dモデル
+  - 一般的
+- k=4
+  - 企画・お笑い・トーク
+  - イラスト・2Dモデル
+  - 歌
+  - 一般的
+- k=5
+  - 企画・お笑い・トーク
+  - イラスト・2Dモデル
+  - 歌
+  - 動画編集
+  - 一般的
+
+```{r}
+### ジャンルのクラスタを保存
+
+f_cluster_name <- function(cluster_num){
+  if(cluster_num == 1){
+    return("1:企画・お笑い・トーク")
+  }else if(cluster_num == 3){
+    return("2:イラスト・2Dモデル")
+  }else if(cluster_num == 4){
+    return("3:歌")
+  }else if(cluster_num == 5){
+    return("4:動画編集")
+  }else{
+    return("5:一般的")
+  }
+}
+
+#data_customer %>% 
+#  mutate(cluster = sapply(cluster,f_cluster_name)) %>% 
+#  write_csv("../csv/customer_cluster.csv")
+
+```
+
+# 得意なことクラスタの解析
+
+```{r, include=FALSE}
+## 得意なことデータの読み込み
+data_customer = read_csv("../csv/customer_cluster.csv", quote = '"') %>% distinct
+```
+
+## 各クラスタの活動者数
+
+```{r}
+data_customer %>% 
+  ggplot(
+    aes(
+      x = cluster
+    )
+  ) +
+  geom_bar(stat="count") +
+  xlab("クラスタ") +
+  ylab("配信者数")
+```
+## 各クラスタごとのチャンネル登録者数
+```{r}
+data_livers %>% 
+  inner_join(data_customer, by="channelId") %>% 
+  ggplot(
+    aes(
+      x = cluster,
+      y = subscriberCount %>% log(10)
+    )
+  ) +
+  geom_boxplot() +
+  xlab("クラスタ") +
+  ylab("チャンネル登録者(対数)")
+```
+
+# ショート動画分析
+
+## ショート動画の投稿頻度
+
+```{r}
+data_short_count<-
+  data_videos %>%
+  filter(video_type == "short") %>% 
+  group_by(channelId) %>% 
+  summarize(n=n())
+
+data_subscriber_and_short <-
+  data_livers %>% 
+  filter(subscriberCount>=100) %>% 
+  left_join(data_short_count, by="channelId") %>% 
+  replace_na(list(n=0)) %>% 
+  mutate(n = ifelse(n>=3,"3~",n))　
+
+data_subscriber_and_short %>% 
+  ggplot(
+    aes(
+      x = n
+    )
+  ) + 
+  geom_bar(stat="count") +
+  xlab("投稿頻度(月あたり)") +
+  ylab("配信者数")
+```
+
+## ショート投稿数とチャンネル登録者数
+
+```{r}
+data_subscriber_and_short %>% 
+  ggplot(
+    aes(
+      x = n,
+      y = subscriberCount %>% log10
+    )
+  )+
+  geom_boxplot() +
+  xlab("クラスタ") +
+  ylab("チャンネル登録者(対数)")
+
+```
+### ショートの投稿頻度は登録者数に影響を与えるか？
+```{r}
+pairwise.t.test(
+  data_subscriber_and_short$subscriberCount %>% log10,
+  data_subscriber_and_short$n,
+  p.adj = "bonf"
+)
+```
+- ショート動画を上げる頻度とチャンネル登録者数は関係ない
+
+## バズったショートを定義する
+
+```{r}
+data_short_buzz <-
+  data_videos %>% 
+  filter(video_type == "live") %>% 
+  inner_join(
+    data_livers %>% select(channelId, subscriberCount),
+    by="channelId"
+  ) %>% 
+  select(channelId, subscriberCount, viewCount) %>% 
+  filter(viewCount>0) %>% 
+  mutate(
+    log_subscriberCount = subscriberCount %>% log10,
+    log_viewCount       = viewCount %>% log10
+  )
+
+# 回帰
+fit <- lm(log_viewCount ~ log_subscriberCount,data = data_short_buzz)
+
+# 90%予測区間を追加
+data_short_buzz <-
+  data_short_buzz %>% 
+  cbind(predict(fit, interval = "prediction", level=0.90))
+
+# バズりshortの定義を可視化
+data_short_buzz %>% 
+  ggplot(
+    aes(
+      x = log_subscriberCount,
+      y = log_viewCount
+    )
+  ) +
+  geom_point() +
+  geom_smooth(
+    method = "lm",
+    se = FALSE
+  ) +
+  geom_ribbon(
+    aes(
+      ymin = lwr, 
+      ymax = upr
+    ),
+    alpha = 0.2,
+    fill = 'blue'
+  )
+```
+
+```{r}
+data_short_buzz <-
+  data_short_buzz %>% 
+  mutate(buzz_count = ifelse(log_viewCount>upr,1,0)) %>% 
+  group_by(channelId) %>% 
+  summarize(buzz_count=sum(buzz_count))
+
+data_livers_with_buzz <-
+  data_livers %>% 
+  inner_join(data_short_buzz, by="channelId") %>% 
+  mutate(buzz_flag = ifelse(buzz_count>0,1,0))
+
+# csvの保存
+# data_livers_with_buzz %>% write_csv("../csv/livers_with_buzz.csv")
+```
+
+
+### バズったShortがあるかどうかと、チャンネル登録者の関係
+
+```{r}
+data_livers_with_buzz %>% 
+  ggplot(
+    aes(
+      x = buzz_flag %>% as.character,
+      y = subscriberCount %>% log10
+    )
+  )+
+  geom_boxplot() +
+  xlab("バズった動画の有無") +
+  ylab("チャンネル登録者(対数)")
+```
+
+- 登録者につながるのは「ショートの投稿頻度」ではなく「バズったショートを上げたかどうか」
+
+

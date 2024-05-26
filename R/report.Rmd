@@ -5,11 +5,16 @@ output: html_notebook
 
 # ライブラリの読み込み
 ```{r}
-library(tidyverse)
 library(corrplot)
 library(stargazer)
 library(car)
 library(broom)
+library(ppcor)
+library(pcalg)
+library(sem)
+library(lavaan)
+library(semPlot)
+library(tidyverse)
 ```
 
 # データの読み込み
@@ -18,14 +23,28 @@ library(broom)
 data_livers = read_csv("../csv/livers_info.csv", quote = '"')
 data_videos = read_csv("../csv/videos_info.csv", quote = '"')
 ```
+# 活動期間
+
+```{r}
+#data_livers <- 
+#  data_livers %>%
+#  mutate(
+#    active_days = as.integer(as.Date("2024-05-01")-as.Date(publishedAt))
+#  )
+```
+
 
 # ビデオデータを要約
 ```{r}
 data_videos_summary <-
-  data_videos %>% 
+  data_videos %>%
   group_by(channelId, video_type) %>%
-  summarise(count=n(), sum=sum(viewCount), median=median(viewCount), max=max(viewCount), .groups = "drop") %>% 
-  pivot_wider(names_from=video_type, values_from=c(count, sum, median, max), values_fill = 0)
+  summarise(count=n(), mean=mean(viewCount), .groups = "drop") %>% 
+  pivot_wider(names_from=video_type, values_from=c(count, mean), values_fill = 0)
+```
+
+```{r}
+data_videos_summary
 ```
 
 
@@ -34,10 +53,180 @@ data_videos_summary <-
 data_result <-
   data_livers %>% 
   inner_join(data_videos_summary, by="channelId") %>% 
-  select(title, subscriberCount, ends_with("movie"), ends_with("live"), ends_with("short"))
+  select(title, subscriberCount, ends_with("movie"), ends_with("live"), ends_with("short")) %>% 
+  filter(subscriberCount>100)
 ```
 
-# チャンネル登録者のヒストグラムを見て、明らかなハズレ値を確認
+# 記述統計
+
+## サマリー
+```{r}
+data_result %>% summary
+```
+## チャンネル登録者と動画再生回数の散布図
+```{r}
+data_livers %>% 
+  select(channelId, subscriberCount) %>% 
+  inner_join(data_videos,by="channelId") %>% 
+  filter(video_type == "short") %>%  
+  ggplot(
+    aes(
+      x = subscriberCount,
+      y = viewCount,
+    )
+  ) +
+  geom_point() +
+  scale_x_log10() +
+  scale_y_log10()
+```
+## shortのviewsのヒストグラム
+```{r}
+data_videos %>% 
+  ggplot(
+    aes(
+      x = 
+    )
+  ) +
+  geom_histogram()
+```
+
+## 活動期間のヒストグラム
+```{r}
+data_result %>% 
+  ggplot(
+    aes(
+      x = active_days
+    )
+  ) +
+  geom_histogram()
+```
+
+## 一日あたりの伸び
+```{r}
+data_result %>% 
+  ggplot(
+    aes(
+      x = (subscriberCount/active_days) %>% log
+    )
+  ) +
+  geom_histogram()
+```
+
+## 配信時間とチャンネル登録者数
+```{r}
+data_result %>% 
+  ggplot(
+    aes(
+      x = subscriberCount %>% log,
+      y = active_days %>% log
+    )
+  ) +
+  geom_point()
+```
+
+### 1ヶ月の総配信時間を算出
+
+```{r}
+f_time <- function(duration){
+  hour    = duration %>% str_match("(\\d*)H") %>%  .[2] %>% as.integer %>% ifelse(is.na(.),0,.)
+  minutes = duration %>% str_match("(\\d*)M") %>%  .[2] %>% as.integer %>% ifelse(is.na(.),0,.)
+  second  = duration %>% str_match("(\\d*)S") %>%  .[2] %>% as.integer %>% ifelse(is.na(.),0,.)
+  return(hour*60*60 + minutes*60 + second)
+}
+
+data_live_duration <-
+  data_videos %>% 
+  filter(video_type == "live") %>% 
+  mutate(duration_sec = sapply(duration,f_time)) %>% 
+  group_by(channelId) %>% 
+  summarise_at("duration_sec", sum) %>% 
+  rename(total_time = duration_sec)
+
+data_subscriber_vs_duration <-
+  data_livers %>% 
+  inner_join(data_live_duration, by="channelId")
+```
+
+### 総配信時間のヒストグラム
+
+```{r}
+data_subscriber_vs_duration %>% 
+  ggplot(
+    aes(
+      x = total_time
+    )
+  ) +
+  geom_histogram() +
+  xlim(0,300000)
+```
+
+### 階級ごとにチャンネル登録者を割り出す
+
+```{r}
+f_class <- function(total_time){
+  if(total_time <= 54000*1){
+    return("1:-30m")
+  }else if(total_time<=54000*2){
+    return("2:-1h")
+  }else if(total_time<=54000*3){
+    return("3:-1h30m")
+  }else if(total_time<=54000*4){
+    return("4:-2h")
+  }else{
+    return("5:2h30m-")
+  }
+}
+
+data_subscriber_vs_duration %>% 
+  drop_na %>% 
+  filter(
+    subscriberCount > 100
+  ) %>% 
+  mutate(live_class = sapply(total_time, f_class)) %>% 
+  ggplot(
+    aes(
+      x = live_class,
+      y = subscriberCount,
+    )
+  ) +
+  geom_boxplot() +
+  ylim(0,1500)
+```
+### 散布図で確認
+
+```{r}
+data_subscriber_vs_duration %>% 
+  ggplot(
+    aes(
+      x = log(total_time),
+      y = log(subscriberCount)
+    )
+  ) +
+  geom_point()
+```
+### 相関係数
+
+```{r}
+cor(
+  data_subscriber_vs_duration %>% 
+    select(subscriberCount, total_time) %>% 
+    as.matrix %>% 
+    log
+)
+```
+
+
+## それぞれの媒体の投稿比率
+```{r}
+cat("合計データ数",nrow(data_result2))
+cat("\n配信比率：",sum(data_result2$sum_live>0)/nrow(data_result2))
+cat("\n動画投稿比率：",sum(data_result2$sum_movie>0)/nrow(data_result2))
+cat("\nshort投稿比率：",sum(data_result2$sum_short>0)/nrow(data_result2))
+cat("\n全活動比率：",nrow(data_result2  %>% filter(sum_live>0, sum_movie>0, sum_short>0))/nrow(data_result2))
+```
+
+# 生の値で分析
+## チャンネル登録者のヒストグラムを見て、明らかなハズレ値を確認
 ```{r}
 data_result %>% 
   ggplot(
@@ -47,15 +236,18 @@ data_result %>%
   ) +
   geom_histogram()
 ```
-# ハズレ値を除去
+## ハズレ値を除去
 
 ```{r}
 data_result2 <-
   data_result %>% 
-  filter(between(subscriberCount, 100, 7500))
+  filter(between(subscriberCount, 100, 25000))
 ```
 
-# 相関係数の一覧
+
+
+
+## 相関係数の一覧
 ```{r}
 c<-
   data_result2 %>%
@@ -71,7 +263,7 @@ round(c,2)　#「c」の中の数値を小数点以下3桁で四捨五入する
 corrplot(c, tl.col="black",tl.cex=1.0,tl.srt=45,p.mat=p[[1]],insig="blank",sig.level=0.05)
 #corrplot(c, type="upper")
 ```
-## わかりそうなこと
+### わかりそうなこと
 
 - 登録者と強く相関があるのは、1回あたりの配信の総来場者数
   - 配信の回数とは相関がない
@@ -85,14 +277,47 @@ corrplot(c, tl.col="black",tl.cex=1.0,tl.srt=45,p.mat=p[[1]],insig="blank",sig.l
 - 配信一回あたりの総来場者数と動画の総再生回数には相関がある。
   - ショートとは相関がない
 
-# それぞれの媒体の投稿比率
+## 因果探索(LiNGAM)
+
 ```{r}
-cat("配信比率：",sum(data_result2$sum_live>1)/nrow(data_result2))
-cat("\n動画投稿比率：",sum(data_result2$sum_movie>1)/nrow(data_result2))
-cat("\nshort投稿比率：",sum(data_result2$sum_short>1)/nrow(data_result2))
+# LiNGAMモデルの推定用関数定義
+est_lingam <- function(X){
+
+  model <- 
+    X %>%
+    lingam(verbose = F)
+  
+  arrow_amt <- 
+    model %>% 
+    as("amat") %>%
+    as.matrix()
+  
+  colnames(arrow_amt) <- names(X)
+  rownames(arrow_amt) <- names(X)
+  
+  return(arrow_amt)
+}
 ```
 
-# short再考
+```{r}
+data_result2 %>%
+  filter(sum_movie>0) %>% 
+  select(subscriberCount, mean_movie) %>%
+  est_lingam
+```
+### データ数少ないかも、要検討
+
+```{r}
+data_result2 %>% select(subscriberCount, sum_movie, mean_live)
+```
+
+
+### 考察
+- 登録者と配信総来場者、動画総再生数と配信総来場者に偏相関あり
+- 登録者と動画総再生数には偏相関なし
+  - 動画総再生が増えると
+
+## short再考
 
 ## ショート動画をどのくらい上げているかヒストグラムを書いてみる
 ```{r}
@@ -134,7 +359,7 @@ corrplot(c, tl.col="black",tl.cex=1.0,tl.srt=45,p.mat=p[[1]],insig="blank",sig.l
 - shortの質が良いと、配信頻度が低くても配信一回あたりの総来場者が増えるので、  
   トータルでは配信に来る人が多くなる
 
-# 同程度の配信頻度の人がShort動画を作るとどのくらい伸びる？
+## 同程度の配信頻度の人がShort動画を作るとどのくらい伸びる？
 
 ## 配信頻度を見てみる
 ```{r}
@@ -148,9 +373,9 @@ data_short %>%
 ```
 ### ここから先はサンプル数不足になりそうなので未着手
 
-# 動画再考
+## 動画再考
 
-## 動画をどのくらい上げているかヒストグラムを書いてみる
+### 動画をどのくらい上げているかヒストグラムを書いてみる
 ```{r}
 data_result2 %>% 
   filter(sum_movie > 0) %>% 
@@ -163,7 +388,7 @@ data_result2 %>%
   xlim(0,8000)
 ```
 
-## 動画を上げている人限定で相関行列を作る
+### 動画を上げている人限定で相関行列を作る
 
 ```{r}
 data_movie <-
@@ -185,18 +410,18 @@ corrplot(c, tl.col="black",tl.cex=1.0,tl.srt=45,p.mat=p[[1]],insig="blank",sig.l
 #corrplot(c, type="upper")
 ```
   
-# 統計情報の確認
+## 統計情報の確認
 ```{r}
 summary(data_result)
 ```
 
-# 登録者を絞って見てみる
+## 登録者を絞って見てみる
 ```{r}
 data_result3 <-
   data_result %>% filter(between(subscriberCount, 100, 1000))
 ```
 
-# 相関係数の一覧
+## 相関係数の一覧
 ```{r}
 c<-
   data_result3 %>%
@@ -212,21 +437,21 @@ round(c,2)　#「c」の中の数値を小数点以下3桁で四捨五入する
 corrplot(c, tl.col="black",tl.cex=1.0,tl.srt=45,p.mat=p[[1]],insig="blank",sig.level=0.01)
 ```
 
-# 重回帰分析してみる
+## 重回帰分析してみる
 
 ```{r}
 reg = lm(subscriberCount ~ sum_movie + sum_live + sum_short, data_result2)
 step(reg)
 ```
 
-# 多重共線性(VIF>10かどうかで判別)
+## 多重共線性(VIF>10かどうかで判別)
 ```{r}
 vif(model)
 ```
-# Q-Qプロット
+## Q-Qプロット
 
 ```{r}
-model = lm(formula = subscriberCount ~ count_live+ median_short, data = data_result2)
+model = lm(formula = subscriberCount ~ count_live+ mean_short, data = data_result2)
 
 model %>% 
   augment() %>% 
@@ -237,9 +462,817 @@ model %>%
 ```
 
 
+# 対数分布で分析
+
+## 対数のチャンネル登録者
+
 ```{r}
-c
+data_result %>% 
+  ggplot(
+    aes(
+      x = log(subscriberCount)
+    )
+  ) +
+  geom_histogram()
 ```
+
+## 1動画あたり再生数の対数ヒストグラム
+
+```{r}
+data_result %>% 
+  ggplot(
+    aes(
+      x = log(mean_movie)
+    )
+  ) +
+  geom_histogram()
+```
+
+## 対数同士の散布図
+
+```{r}
+data_result %>% 
+  ggplot(
+    aes(
+      x = log(mean_short),
+      y = log(subscriberCount)
+    )
+  ) +
+  geom_point()
+```
+
+
+## データフレームを対数変換
+
+```{r}
+log_change <- function(x){
+  return(ifelse(x==0, NA, log(x)))
+  #return(log(1+x))
+}
+
+data_log <-
+  data_result %>%
+  select(-title) %>% 
+  mutate(
+    subscriberCount = subscriberCount %>% log10,
+    mean_movie      = ifelse(mean_movie==0,NA,mean_movie%>%log10),
+    mean_live       = ifelse(mean_live ==0,NA,mean_live %>%log10),
+    mean_short      = ifelse(mean_short==0,NA,mean_short%>%log10)
+  )
+```
+
+```{r}
+data_log
+```
+
+## 相関行列を書く
+
+```{r}
+c<-
+  data_log %>%
+  cor(use="pairwise.complete.obs")
+
+p<-
+  data_log %>%
+  cor.mtest(use="pairwise.complete.obs")
+
+round(c,2)　#「c」の中の数値を小数点以下3桁で四捨五入する
+corrplot(c, tl.col="black",tl.cex=1.0,tl.srt=45,p.mat=p[[1]],insig="blank",sig.level=0.05)
+```
+# 偏相関係数
+
+## live と movie
+```{r}
+pcor(data_log %>% select(subscriberCount, mean_live, mean_movie) %>% drop_na)
+```
+
+## live と short
+```{r}
+pcor(data_log %>% select(subscriberCount, mean_live, mean_short) %>% drop_na)
+```
+## movie と short
+```{r}
+pcor(data_log %>% select(subscriberCount, mean_movie, mean_short) %>% drop_na)
+```
+
+### 考察
+- live, movie, shortはsubscriberCountを無視してもそれなりに相関があるっぽい
+
+# 因果探索(LiNGAM)
+
+```{r}
+# LiNGAMモデルの推定用関数定義
+est_lingam <- function(X){
+
+  model <- 
+    X %>%
+    lingam(verbose = F)
+  
+  arrow_amt <- 
+    model %>% 
+    as("amat") %>%
+    as.matrix()
+  
+  colnames(arrow_amt) <- names(X)
+  rownames(arrow_amt) <- names(X)
+  
+  return(arrow_amt)
+}
+```
+
+## 二項因果
+
+### mean_movie
+```{r}
+data = matrix(0, nrow = 2, ncol = 2)
+for (i in 1:100){
+  tmp <-
+    data_log %>% 
+    select(subscriberCount, mean_movie) %>% 
+    drop_na %>%
+    est_lingam
+  data = data + tmp/100
+}
+data
+```
+### mean_live
+```{r}
+data = matrix(0, nrow = 2, ncol = 2)
+for (i in 1:100){
+  tmp <-
+    data_log %>%
+    as.data.frame %>%
+    select(subscriberCount, mean_live) %>% 
+    drop_na %>%
+    est_lingam
+  
+  data = data + tmp/100
+}
+data
+```
+
+### mean_short
+```{r}
+data = matrix(0, nrow = 2, ncol = 2)
+for (i in 1:100){
+  tmp <-
+    data_log %>%
+    as.data.frame %>%
+    select(subscriberCount, mean_short) %>% 
+    drop_na %>%
+    est_lingam
+  
+  data = data + tmp/100
+}
+data
+```
+
+### count_movie
+```{r}
+data = matrix(0, nrow = 2, ncol = 2)
+for (i in 1:100){
+  tmp <-
+    data_log %>%
+    as.data.frame %>%
+    select(subscriberCount, count_movie) %>% 
+    drop_na %>%
+    est_lingam
+  
+  data = data + tmp/100
+}
+data
+```
+### count_live
+```{r}
+data = matrix(0, nrow = 2, ncol = 2)
+for (i in 1:100){
+  tmp <-
+    data_log %>%
+    as.data.frame %>%
+    select(subscriberCount, count_live) %>% 
+    drop_na %>%
+    est_lingam
+  
+  data = data + tmp/100
+}
+data
+```
+
+### count_short
+```{r}
+data = matrix(0, nrow = 2, ncol = 2)
+for (i in 1:100){
+  tmp <-
+    data_log %>%
+    as.data.frame %>%
+    select(subscriberCount, count_short) %>% 
+    drop_na %>%
+    est_lingam
+  
+  data = data + tmp/100
+}
+data
+```
+
+### count_movie
+```{r}
+data = matrix(0, nrow = 2, ncol = 2)
+for (i in 1:100){
+  tmp <-
+    data_log %>%
+    as.data.frame %>%
+    select(subscriberCount, count_movie) %>% 
+    drop_na %>%
+    est_lingam
+  
+  data = data + tmp/100
+}
+data
+```
+### 配信をたくさんすればうまくなる？
+```{r}
+data = matrix(0, nrow = 2, ncol = 2)
+for (i in 1:100){
+  tmp <-
+    data_log %>%
+    as.data.frame %>%
+    select(count_live, mean_live) %>% 
+    drop_na %>%
+    est_lingam
+  
+  data = data + tmp/100
+}
+data
+```
+
+### liveとshortの因果関係
+```{r}
+data = matrix(0, nrow = 2, ncol = 2)
+for (i in 1:100){
+  tmp <-
+    data_log %>%
+    as.data.frame %>%
+    select(mean_live, mean_short) %>% 
+    drop_na %>%
+    est_lingam
+  
+  data = data + tmp/100
+}
+data
+```
+### liveとmovieの因果関係
+```{r}
+data = matrix(0, nrow = 2, ncol = 2)
+for (i in 1:100){
+  tmp <-
+    data_log %>%
+    as.data.frame %>%
+    select(mean_live, mean_movie) %>% 
+    drop_na %>%
+    est_lingam
+  
+  data = data + tmp/100
+}
+data
+```
+
+#### まとめ
+mean_movie <- subscriberCount
+mean_live  -> subscriberCount
+mean_short -> subscriberCount
+
+count_movieは関係なし
+count_live   -> subscriberCount
+count_shortは関係なし
+
+## 3項
+
+### media
+```{r}
+data = matrix(0, nrow = 3, ncol = 3)
+for (i in 1:100){
+  tmp <-
+    data_log %>%
+    as.data.frame %>%
+    select(subscriberCount, count_movie, mean_movie) %>% 
+    drop_na %>%
+    est_lingam
+  
+  data = data + tmp/100
+}
+data
+```
+### live
+```{r}
+data = matrix(0, nrow = 3, ncol = 3)
+for (i in 1:100){
+  tmp <-
+    data_log %>%
+    as.data.frame %>%
+    select(subscriberCount, count_live, mean_live) %>% 
+    drop_na %>%
+    est_lingam
+  
+  data = data + tmp/100
+}
+data
+```
+
+### short
+```{r}
+data = matrix(0, nrow = 3, ncol = 3)
+for (i in 1:100){
+  tmp <-
+    data_log %>%
+    as.data.frame %>%
+    select(subscriberCount, count_short, mean_short) %>% 
+    drop_na %>%
+    est_lingam
+  
+  data = data + tmp/100
+}
+data
+```
+
+### liveとmovie
+```{r}
+data = matrix(0, nrow = 3, ncol = 3)
+for (i in 1:100){
+  tmp <-
+    data_log %>%
+    select(subscriberCount, mean_live, mean_movie) %>% 
+    drop_na %>%
+    est_lingam
+  
+  data = data + tmp/100
+}
+data
+```
+
+## ごちゃまぜ
+```{r}
+data = matrix(0, nrow = 4, ncol = 4)
+for (i in 1:100){
+  tmp <-
+    data_log %>%
+    as.data.frame %>%
+    select(subscriberCount, mean_live, mean_short, mean_movie) %>% 
+    drop_na %>%
+    est_lingam
+  
+  data = data + tmp/100
+}
+data
+```
+
+# 重回帰分析
+```{r}
+data_reg <-
+  data_log %>%
+  drop_na
+
+reg = lm(
+  subscriberCount ~ mean_live,
+  data_reg
+)
+
+reg %>%  summary
+vif(reg)
+```
+
+```{r}
+summary(
+  lm(formula = subscriberCount ~ mean_live, data = data_reg)
+)
+```
+# SEM
+
+## 相関関係にある指標
+subscriberCount <-> mean_live, mean_movie, mean_short
+
+## mean同士
+
+```{r}
+data12 <- '
+mean_live  ~ subscriberCount
+mean_movie ~ subscriberCount
+mean_short ~ subscriberCount
+subscriberCount ~~ 1*subscriberCount
+'
+model12 <- sem(data12, fixed.x = FALSE, data= data_log %>% drop_na)
+
+
+data09 <- '
+subscriberCount ~ mean_live + mean_movie + mean_short
+mean_live ~~ 1*mean_live
+
+'
+model09 <- sem(data09, fixed.x = FALSE, data= data_log %>% drop_na)
+
+
+data14 <- '
+subscriberCount ~ mean_movie + mean_short
+mean_live    ~ subscriberCount
+mean_movie ~~ 1*mean_movie
+'
+model14 <- sem(data14, fixed.x = FALSE, data= data_log %>% drop_na)
+
+
+data10 <- '
+subscriberCount ~ mean_live + mean_short
+mean_movie    ~ subscriberCount
+mean_live ~~ 1*mean_live
+'
+model10 <- sem(data10, fixed.x = FALSE, data= data_log %>% drop_na)
+
+
+data13 <- '
+subscriberCount ~ mean_live + mean_movie
+mean_short    ~ subscriberCount
+mean_live ~~ 1*mean_live
+'
+model13 <- sem(data13, fixed.x = FALSE, data= data_log %>% drop_na)
+
+data15 <- '
+subscriberCount ~ mean_live
+mean_movie    ~ subscriberCount
+mean_short    ~ subscriberCount
+mean_live ~~ 1*mean_live
+'
+model15 <- sem(data15, fixed.x = FALSE, data= data_log %>% drop_na)
+
+data16 <- '
+subscriberCount ~ mean_movie
+mean_live     ~ subscriberCount
+mean_short    ~ subscriberCount
+mean_movie ~~ 1*mean_movie
+'
+model16 <- sem(data16, fixed.x = FALSE, data= data_log %>% drop_na)
+data17 <- '
+subscriberCount ~ mean_short
+mean_live     ~ subscriberCount
+mean_movie    ~ subscriberCount
+mean_short ~~ 1*mean_short
+'
+model17 <- sem(data17, fixed.x = FALSE, data= data_log %>% drop_na)
+
+```
+
+```{r}
+print("model12")
+fitmeasures(model12, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model9")
+fitmeasures(model09, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model14")
+fitmeasures(model14, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model10")
+fitmeasures(model10, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model13")
+fitmeasures(model13, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model15")
+fitmeasures(model15, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model16")
+fitmeasures(model16, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model17")
+fitmeasures(model17, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+```
+
+```{r}
+data22 <- '
+subscriberCount ~ mean_live
+mean_movie    ~ subscriberCount
+mean_short    ~ subscriberCount
+mean_live ~~ 1*mean_live
+'
+model22 <- sem(data22, fixed.x = FALSE, data= data_log %>% drop_na)
+
+data23 <- '
+subscriberCount ~ mean_live
+mean_movie    ~ mean_live
+mean_short    ~ mean_live + subscriberCount
+mean_live    ~~ 1*mean_live
+'
+model23 <- sem(data23, fixed.x = FALSE, data= data_log %>% drop_na)
+```
+
+
+```{r}
+print("model22")
+fitmeasures(model22, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model23")
+fitmeasures(model23, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+```
+
+```{r}
+summary(model23)
+```
+
+
+
+```{r}
+data24 <- '
+subscriberCount ~ mean_live + count_live
+mean_movie    ~ subscriberCount 
+mean_short    ~ subscriberCount
+mean_live    ~~ 1*mean_live
+'
+model24 <- sem(data24, fixed.x = FALSE, data= data_log %>% drop_na)
+
+data30 <- '
+subscriberCount ~ mean_live + count_live
+mean_movie    ~ subscriberCount + count_live + mean_live
+mean_short    ~ subscriberCount
+mean_live    ~~ 1*mean_live
+'
+model30 <- sem(data30, fixed.x = FALSE, data= data_log %>% drop_na)
+
+data29 <- '
+subscriberCount ~ mean_live + count_live
+mean_movie    ~ subscriberCount 
+mean_short    ~ subscriberCount + count_live + mean_live
+count_live     ~~ 1*count_live
+'
+model29 <- sem(data29, fixed.x = FALSE, data= data_log %>% drop_na)
+
+data31 <- '
+subscriberCount ~ mean_live + count_live
+mean_movie    ~ subscriberCount 
+mean_short    ~ mean_live + count_live
+count_live     ~~ 1*count_live
+'
+model31 <- sem(data31, fixed.x = FALSE, data= data_log %>% drop_na)
+
+data33 <- '
+subscriberCount ~ mean_live + count_live
+mean_movie    ~ count_live
+mean_short    ~ mean_live + count_live
+count_live     ~~ 1*count_live
+'
+model33 <- sem(data33, fixed.x = FALSE, data= data_log %>% drop_na)
+```
+
+```{r}
+print("model24")
+fitmeasures(model24, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model30")
+fitmeasures(model30, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model29")
+fitmeasures(model29, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model31")
+fitmeasures(model31, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model33")
+fitmeasures(model33, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+```
+
+```{r}
+summary(model33)
+```
+
+# SEM(movieだけ)
+```{r}
+data_sem_movie = data_log %>% filter(count_movie>0)
+
+data34 <- '
+mean_live  ~ subscriberCount
+mean_movie ~ subscriberCount
+subscriberCount ~~ 1*subscriberCount
+'
+model34 <- sem(data34, fixed.x = FALSE, data= data_sem_movie)
+
+data35 <- '
+subscriberCount ~ mean_live + mean_movie
+mean_live ~~ 1*mean_live
+'
+model35 <- sem(data35, fixed.x = FALSE, data= data_sem_movie)
+
+data36 <- '
+subscriberCount ~ mean_live
+mean_movie    ~ subscriberCount
+mean_live ~~ 1*mean_live
+'
+model36 <- sem(data36, fixed.x = FALSE, data= data_sem_movie)
+
+data37 <- '
+subscriberCount ~ mean_movie
+mean_live     ~ subscriberCount
+mean_movie ~~ 1*mean_movie
+'
+model37 <- sem(data37, fixed.x = FALSE, data= data_sem_movie)
+
+data38 <- '
+subscriberCount ~ mean_live
+mean_movie    ~ mean_live
+mean_live  ~~ 1*mean_live
+'
+model38 <- sem(data38, fixed.x = FALSE, data= data_sem_movie)
+```
+
+```{r}
+print("model34")
+fitmeasures(model34, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model35")
+fitmeasures(model35, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model36")
+fitmeasures(model36, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model37")
+fitmeasures(model37, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model38")
+fitmeasures(model38, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+```
+# SEM(shortだけ)
+```{r}
+data_sem_short = data_log %>% filter(count_short>0)
+
+data34 <- '
+mean_live  ~ subscriberCount
+mean_short ~ subscriberCount
+subscriberCount ~~ 1*subscriberCount
+'
+model34 <- sem(data34, fixed.x = FALSE, data= data_sem_short)
+
+data38 <- '
+subscriberCount ~ mean_live
+mean_short    ~ mean_live
+mean_live  ~~ 1*mean_live
+'
+model38 <- sem(data38, fixed.x = FALSE, data= data_sem_short)
+
+data42 <- '
+subscriberCount ~ mean_live + mean_short
+mean_live  ~~ 1*mean_live
+'
+model42 <- sem(data42, fixed.x = FALSE, data= data_sem_short)
+
+data43 <- '
+mean_short ~ mean_live + subscriberCount
+mean_live  ~~ 1*mean_live
+'
+model43 <- sem(data43, fixed.x = FALSE, data= data_sem_short)
+
+data44 <- '
+mean_live ~ subscriberCount + mean_short
+mean_short  ~~ 1*mean_short
+'
+model44 <- sem(data44, fixed.x = FALSE, data= data_sem_short)
+
+data35 <- '
+subscriberCount ~ mean_live + mean_short
+mean_live ~~ 1*mean_live
+'
+model35 <- sem(data35, fixed.x = FALSE, data= data_sem_short)
+
+data36 <- '
+subscriberCount ~ mean_live
+mean_short    ~ subscriberCount
+mean_live ~~ 1*mean_live
+'
+model36 <- sem(data36, fixed.x = FALSE, data= data_sem_short)
+
+data37 <- '
+subscriberCount ~ mean_short
+mean_live     ~ subscriberCount
+mean_short ~~ 1*mean_short
+'
+model37 <- sem(data37, fixed.x = FALSE, data= data_sem_short)
+
+data39 <- '
+subscriberCount ~ mean_live
+mean_live     ~ mean_short
+mean_short   ~~ 1*mean_short
+'
+model39 <- sem(data39, fixed.x = FALSE, data= data_sem_short)
+
+data40 <- '
+subscriberCount ~ mean_short
+mean_short    ~ mean_live
+mean_live    ~~ 1*mean_live
+'
+model40 <- sem(data40, fixed.x = FALSE, data= data_sem_short)
+
+data41 <- '
+subscriberCount ~ mean_live + mean_short
+mean_short    ~ mean_live
+mean_live  ~~ 1*mean_live
+'
+model41 <- sem(data41, fixed.x = FALSE, data= data_sem_short)
+```
+
+```{r}
+print("model34")
+fitmeasures(model34, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model38")
+fitmeasures(model38, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model42")
+fitmeasures(model42, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model43")
+fitmeasures(model43, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model44")
+fitmeasures(model44, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model35")
+fitmeasures(model35, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model36")
+fitmeasures(model36, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model37")
+fitmeasures(model37, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model39")
+fitmeasures(model39, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model40")
+fitmeasures(model40, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model41")
+fitmeasures(model41, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+```
+```{r}
+summary(model41)
+```
+
+mean_short, mean_live, count_liveを混ぜたモデル
+```{r}
+data45 <- '
+subscriberCount ~ mean_live + count_live + mean_short
+mean_live       ~~ 1*mean_live
+'
+model45 <- sem(data45, fixed.x = FALSE, data= data_sem_short)
+
+data46 <- '
+mean_live       ~ count_live
+subscriberCount ~ mean_live + mean_short
+count_live       ~~ 1*count_live
+'
+model46 <- sem(data46, fixed.x = FALSE, data= data_sem_short)
+
+data47 <- '
+mean_live       ~ count_live
+subscriberCount ~ mean_live
+mean_short      ~ mean_live
+count_live       ~~ 1*count_live
+'
+model47 <- sem(data47, fixed.x = FALSE, data= data_sem_short)
+
+data48 <- '
+mean_live       ~ count_live
+subscriberCount ~ mean_live
+mean_short      ~ subscriberCount
+count_live       ~~ 1*count_live
+'
+model48 <- sem(data48, fixed.x = FALSE, data= data_sem_short)
+
+data49 <- '
+subscriberCount  ~ mean_live + count_live
+mean_short       ~ mean_live
+mean_live       ~~ 1*mean_live
+'
+model49 <- sem(data49, fixed.x = FALSE, data= data_sem_short)
+```
+
+```{r}
+print("model45")
+fitmeasures(model45, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model46")
+fitmeasures(model46, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model47")
+fitmeasures(model47, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model48")
+fitmeasures(model48, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+
+print("model49")
+fitmeasures(model49, c("chisq", "df", "pvalue","gfi", "agfi", "nfi", "cfi", "rmsea", "aic"))
+```
+
+
+```{r}
+summary(model47)
+```
+
 
 
 
