@@ -3,11 +3,11 @@ title: "個人VTuber分析レポート"
 author: "まる"
 date: "2024年5月27日"
 output:
-  html_document:
+  html_document: 
     toc: true
     toc_float: true
-    md_extentions: NULL
-    code_folding: "hide"
+    md_extentions: null
+    code_folding: hide
     number_section: true
 ---
 
@@ -462,7 +462,9 @@ data_customer %>%
     cluster ~ .
   )
 ```
+
 ### 結果の解釈
+
 - k=2
   - 企画・お笑い
   - 一般的
@@ -526,6 +528,7 @@ data_customer %>%
   ylab("配信者数")
 ```
 ## 各クラスタごとのチャンネル登録者数
+
 ```{r}
 data_livers %>% 
   inner_join(data_customer, by="channelId") %>% 
@@ -585,6 +588,7 @@ data_subscriber_and_short %>%
 
 ```
 ### ショートの投稿頻度は登録者数に影響を与えるか？
+
 ```{r}
 pairwise.t.test(
   data_subscriber_and_short$subscriberCount %>% log10,
