@@ -603,12 +603,12 @@ pairwise.t.test(
 ```{r}
 data_short_buzz <-
   data_videos %>% 
-  filter(video_type == "live") %>% 
+  filter(video_type == "short") %>% 
   inner_join(
     data_livers %>% select(channelId, subscriberCount),
     by="channelId"
   ) %>% 
-  select(channelId, subscriberCount, viewCount) %>% 
+  select(channelId, title, subscriberCount, viewCount) %>% 
   filter(viewCount>0) %>% 
   mutate(
     log_subscriberCount = subscriberCount %>% log10,
@@ -647,7 +647,7 @@ data_short_buzz %>%
 ```
 
 ```{r}
-data_short_buzz <-
+data_short_buzz_summary <-
   data_short_buzz %>% 
   mutate(buzz_count = ifelse(log_viewCount>upr,1,0)) %>% 
   group_by(channelId) %>% 
@@ -655,7 +655,7 @@ data_short_buzz <-
 
 data_livers_with_buzz <-
   data_livers %>% 
-  inner_join(data_short_buzz, by="channelId") %>% 
+  inner_join(data_short_buzz_summary, by="channelId") %>% 
   mutate(buzz_flag = ifelse(buzz_count>0,1,0))
 
 # csvの保存
@@ -677,7 +677,23 @@ data_livers_with_buzz %>%
   xlab("バズった動画の有無") +
   ylab("チャンネル登録者(対数)")
 ```
+### 優位性の検定
 
-- 登録者につながるのは「ショートの投稿頻度」ではなく「バズったショートを上げたかどうか」
+```{r}
 
+data_test2 <-
+  data_livers_with_buzz %>% 
+  inner_join(data_gender, by="channelId") %>% 
+  select(-channelId) %>% 
+  pivot_longer(-log_subscriberCount, names_to = "gender") %>% 
+  filter(value==1)
+
+t.test(
+  data_livers_with_buzz %>% filter(buzz_flag==0) %>% select(subscriberCount) %>% log10,
+  data_livers_with_buzz %>% filter(buzz_flag==1) %>% select(subscriberCount) %>% log10,
+  var.equal=F,
+  paired=F
+)
+```
+- バズったShortの有無とチャンネル登録者の間に関連なし
 
