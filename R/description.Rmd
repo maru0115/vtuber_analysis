@@ -17,7 +17,11 @@ library(car)
 library(tidyverse)
 
 # データの読み込み
-data_livers        = read_csv("../csv/livers_info.csv", quote = '"')   %>% distinct
+#data_livers        = read_csv("../csv/livers_info.csv", quote = '"')   %>% distinct
+data_livers        =
+  read_csv("../csv/all_livers_info.csv", quote = '"') %>%
+  filter(subscriberCount>=100) %>%
+  distinct
 data_videos        = read_csv("../csv/videos_info.csv", quote = '"')   %>% distinct
 data_customer      = read_csv("../csv/feature/customer.csv", quote = '"')      %>% distinct
 data_gender        = read_csv("../csv/feature/gender.csv", quote = '"')        %>% distinct
@@ -197,25 +201,59 @@ t.test(
   paired=F
 )
 ```
-- 男女で有意な差は見られない(ただしバ美肉は不利)
 
-```{r, include=FALSE}
-### 対数変換前
+```{r}
 data_test1 <-
-  data_livers %>% 
-  select(channelId, subscriberCount) %>% 
+  data_livers_log %>% 
   inner_join(data_gender, by="channelId") %>% 
   select(-channelId) %>% 
-  pivot_longer(-subscriberCount, names_to = "gender") %>% 
+  pivot_longer(-log_subscriberCount, names_to = "gender") %>% 
   filter(value==1)
 
+### 男性V vs 女性V
 t.test(
-  data_test1 %>% filter(gender=="gender_male") %>% select(subscriberCount),
-  data_test1 %>% filter(gender=="gender_female") %>% select(subscriberCount),
+  data_test1 %>% filter(gender=="gender_male") %>% select(log_subscriberCount),
+  data_test1 %>% filter(gender=="gender_female") %>% select(log_subscriberCount),
   var.equal=F,
   paired=F
 )
 ```
+
+```{r}
+### 男性V vs バ美肉
+t.test(
+  data_test1 %>% filter(gender=="gender_male") %>% select(log_subscriberCount),
+  data_test1 %>% filter(gender=="gender_babiniku") %>% select(log_subscriberCount),
+  var.equal=F,
+  paired=F
+)
+```
+
+- 男性Vは女性Vよりも登録者は少な
+- 男性Vはバ美肉したほうが登録者は多くなる傾向
+
+## コラボの希望度とチャンネル登録者の関係
+
+```{r, include=FALSE}
+## 得意なこと
+data_livers_log %>% 
+  inner_join(data_collabo, by="channelId") %>% 
+  select(-channelId) %>% 
+  ggplot(
+    aes(
+      x = log_subscriberCount,
+      y = collabo_level %>%  as.character
+    )
+  ) + 
+  geom_boxplot() +
+  theme(
+    axis.text.x = element_text(angle = 90)
+  ) +
+  coord_flip()
+```
+
+- 一見すると差はなさそう
+
 ```{r, include=FALSE}
 ## 得意なこと
 data_livers_log %>% 
@@ -418,7 +456,8 @@ pairwise.t.test(
 )
 ```
 
-- 活動ジャンルはチャンネル登録者に依らない
+- チャンネル登録者の数が多い順にジャンルを並べると
+  歌・音楽 > コラボ≒雑談・ゲーム >  お絵かき > ゲーム特化
 
 ## 各ジャンルごとのコラボ希望度
 
@@ -613,7 +652,8 @@ pairwise.t.test(
 )
 ```
 
--- 得意なこととチャンネル登録者は関連がない
+- 得意なことがあるからといってチャンネルが伸びるわけではない
+  - むしろ得意なことに縛られて配信がつまらなくなることもある？
 
 # ショート動画分析
 
@@ -751,22 +791,3 @@ data_livers_with_buzz %>%
   ylab("チャンネル登録者(対数)")
 ```
 
-### 有意性の検定
-
-```{r}
-
-data_test2 <-
-  data_livers_with_buzz %>% 
-  inner_join(data_gender, by="channelId") %>% 
-  select(-channelId, -title, -publishedAt) %>% 
-  pivot_longer(-subscriberCount, names_to = "gender") %>% 
-  filter(value==1)
-
-t.test(
-  data_livers_with_buzz %>% filter(buzz_flag==0) %>% select(subscriberCount) %>% log10,
-  data_livers_with_buzz %>% filter(buzz_flag==1) %>% select(subscriberCount) %>% log10,
-  var.equal=F,
-  paired=F
-)
-```
-- バズったShortの有無とチャンネル登録者の間に関連なし
