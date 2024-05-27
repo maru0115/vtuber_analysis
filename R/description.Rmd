@@ -19,11 +19,11 @@ library(tidyverse)
 # データの読み込み
 data_livers        = read_csv("../csv/livers_info.csv", quote = '"')   %>% distinct
 data_videos        = read_csv("../csv/videos_info.csv", quote = '"')   %>% distinct
-data_customer      = read_csv("../csv/customer.csv", quote = '"')      %>% distinct
-data_gender        = read_csv("../csv/gender.csv", quote = '"')        %>% distinct
-data_genre         = read_csv("../csv/genre.csv", quote = '"')         %>% distinct
-data_model         = read_csv("../csv/model.csv", quote = '"')         %>% distinct
-data_collabo       = read_csv("../csv/collabo.csv", quote = '"')       %>% distinct
+data_customer      = read_csv("../csv/feature/customer.csv", quote = '"')      %>% distinct
+data_gender        = read_csv("../csv/feature/gender.csv", quote = '"')        %>% distinct
+data_genre         = read_csv("../csv/feature/genre.csv", quote = '"')         %>% distinct
+data_model         = read_csv("../csv/feature/model.csv", quote = '"')         %>% distinct
+data_collabo       = read_csv("../csv/feature/collabo.csv", quote = '"')       %>% distinct
 ```
 
 # 各特徴量ごとの活動人数
@@ -37,13 +37,15 @@ data_gender %>%
   ) %>%
   ggplot(
     aes(
-      x = feature %>% reorder(-value),
+      x = feature %>% reorder(value),
       y = value
     )
   ) +
   geom_bar(stat="identity") +
   xlab("性別") +
-  ylab("配信者数")
+  ylab("配信者数")+
+  coord_flip()
+  
 ```
 
 ## モデル
@@ -55,13 +57,14 @@ data_model %>%
   ) %>%
   ggplot(
     aes(
-      x = feature %>% reorder(-value),
+      x = feature %>% reorder(value),
       y = value
     )
   ) +
   geom_bar(stat="identity") +
   xlab("モデル") +
-  ylab("配信者数")
+  ylab("配信者数") +
+  coord_flip()
 ```
 
 ## ジャンル
@@ -73,7 +76,7 @@ data_genre %>%
   ) %>%
   ggplot(
     aes(
-      x = feature %>% reorder(-value),
+      x = feature %>% reorder(value),
       y = value
     )
   ) +
@@ -82,7 +85,8 @@ data_genre %>%
     axis.text.x = element_text(angle = 90)
   ) +
   xlab("ジャンル") +
-  ylab("配信者数")
+  ylab("配信者数")+
+  coord_flip()
 ```
 
 ## 得意なこと
@@ -94,7 +98,7 @@ data_customer %>%
   ) %>%
   ggplot(
     aes(
-      x = feature %>% reorder(-value),
+      x = feature %>% reorder(value),
       y = value
     )
   ) +
@@ -103,7 +107,8 @@ data_customer %>%
     axis.text.x = element_text(angle = 90)
   ) +
   xlab("得意なこと") +
-  ylab("配信者数")
+  ylab("配信者数")+
+  coord_flip()
 ```
 ## コラボ希望度
 ```{r}
@@ -115,7 +120,8 @@ data_collabo %>%
   ) +
   geom_bar(stat="count") +
   xlab("コラボ期待度") +
-  ylab("配信者数")
+  ylab("配信者数") +
+  coord_flip()
 ```
 
 # 各特徴ごとのチャンネル登録者数
@@ -148,7 +154,8 @@ data_livers_log %>%
   ) + 
   geom_boxplot() +
   xlab("性別") +
-  ylab("チャンネル登録者")
+  ylab("チャンネル登録者")+
+  coord_flip()
 ```
 ```{r ,include=FALSE}
 ### 対数変換前
@@ -168,14 +175,14 @@ data_livers %>%
       y = subscriberCount
     )
   ) + 
-  geom_boxplot()
+  geom_boxplot() +
+  coord_flip()
 ```
 
 ## チャンネル登録者に男女差はあるか
 
 ```{r}
 ### 対数変換後
-
 data_test1 <-
   data_livers_log %>% 
   inner_join(data_gender, by="channelId") %>% 
@@ -190,11 +197,10 @@ t.test(
   paired=F
 )
 ```
-- 男女で優劣は見られない(ただしバ美肉は不利)
+- 男女で有意な差は見られない(ただしバ美肉は不利)
 
 ```{r, include=FALSE}
 ### 対数変換前
-
 data_test1 <-
   data_livers %>% 
   select(channelId, subscriberCount) %>% 
@@ -212,7 +218,6 @@ t.test(
 ```
 ```{r, include=FALSE}
 ## 得意なこと
-
 data_livers_log %>% 
   inner_join(data_customer, by="channelId") %>% 
   select(-channelId) %>% 
@@ -227,7 +232,8 @@ data_livers_log %>%
   geom_boxplot() +
   theme(
     axis.text.x = element_text(angle = 90)
-  )
+  ) +
+  coord_flip()
 ```
 
 
@@ -258,6 +264,7 @@ print(res)
 ```
 
 ### エルボー図
+
 ```{r}
 k.max <- 15
 wss <- sapply(1:k.max, 
@@ -267,7 +274,9 @@ plot(1:k.max, wss,
      xlab="Number of clusters K",
      ylab="Total within-clusters sum of squares")
 ```
+
 ### 階層クラスター分析
+
 ```{r}
 result <- hclust(dist(d), method = "ward.D2")
 plot(as.dendrogram(result))
@@ -277,21 +286,37 @@ rect.hclust(result, k = 5)
 ## クラスタリングの実施
 
 ```{r}
-cluster = cutree(result, k=5)
+cluster = cutree(result, k=7)
+len = length(cluster)
+
+data_genre_count <-
+  data_genre %>%
+  pivot_longer(
+    cols     = -channelId,
+    names_to = "genre"
+  ) %>% 
+  select(-channelId) %>% 
+  group_by(genre) %>% 
+  summarize(count=sum(value))
 
 data_genre %>% 
   select(starts_with("genre")) %>% 
   mutate(cluster = cluster) %>% 
   pivot_longer(
     cols = -cluster,
-    names_to = "feature"
+    names_to = "genre"
   ) %>% 
-  group_by(cluster, feature) %>%
-  summarize(mean=mean(value)) %>% 
+  inner_join(
+    data_genre_count,
+    by = "genre"
+  ) %>% 
+  group_by(cluster, genre) %>%
+  summarize(weight=sum(value/count),n = n()) %>% 
+  mutate(rate = weight) %>% 
   ggplot(
     aes(
-      x = feature,
-      y = mean
+      x = genre,
+      y = rate
     )
   ) +
   geom_bar(stat="identity") +
@@ -300,62 +325,57 @@ data_genre %>%
   ) +
   facet_grid(
     cluster ~ .
-  )
+  ) +
+  ylim(0,1)
 ```
 
 ### 結果の解釈
-- k = 2
-  - ゲーム特化
-  - その他
-- k = 3
-  - ゲーム特化
-  - お絵かき、麻雀、TRPG
-  - その他
-- k = 4
-  - ゲーム特化
-  - お絵かき、麻雀、TRPG
-  - 歌・音楽
-  - その他
-- k = 5 (一番解釈しやすい)
-  - ゲーム特化
-  - お絵かき
-  - 歌・音楽
-  - コラボ
-  - 雑談・ゲーム
 
+- k = 7
+  - オールジャンル
+  - ゲーム特化
+  - 音楽
+  - お絵かき
+  - アニメ
+  - ギャンブル・TRPG
+  - その他に特化
 
 ```{r, include=FALSE}
 ### ジャンルのクラスタを保存
-f_cluster_name <- function(cluster_num){
-  if(cluster_num == 1){
-    return("1:雑談・ゲーム")
-  }else if(cluster_num == 2){
+f_genre_cluster_name <- function(cluster_num){
+  if(cluster_num == 5){
+    return("1:オールジャンル")
+  }else if(cluster_num == 4){
     return("2:ゲーム特化")
   }else if(cluster_num == 3){
-    return("3:歌・音楽")
-  }else if(cluster_num == 4){
+    return("3:音楽")
+  }else if(cluster_num == 6){
     return("4:お絵かき")
+  }else if(cluster_num == 1){
+    return("5:アニメ")
+  }else if(cluster_num == 7){
+    return("6:ギャンブル・TRPG")
   }else{
-    return("5:コラボ")
+    return("7:その他に特化")
   }
 }
 
 #data_genre %>% 
-#  mutate(cluster = sapply(cluster,f_cluster_name)) %>% 
-#  write_csv("../csv/genre_cluster.csv")
+#  mutate(cluster = sapply(cluster,f_genre_cluster_name)) %>% 
+#  write_csv("../csv/feature/genre_cluster.csv")
 ```
 
 # ジャンルクラスタの解析
 
 ```{r, include=FALSE}
 ## ジャンルデータの読み込み
-data_genre = read_csv("../csv/genre_cluster.csv", quote = '"') %>% distinct
+data_genre_cluster = read_csv("../csv/feature/genre_cluster.csv", quote = '"') %>% distinct
 ```
 
 ## 各ジャンルの活動者数
 
 ```{r}
-data_genre %>% 
+data_genre_cluster %>% 
   ggplot(
     aes(
       x = cluster
@@ -363,30 +383,49 @@ data_genre %>%
   ) +
   geom_bar(stat="count") +
   xlab("クラスタ") +
-  ylab("配信者数")
+  ylab("配信者数") +
+  coord_flip()
 ```
 
 ## 各ジャンルごとのチャンネル登録者数
 
 ```{r}
 data_livers %>% 
-  inner_join(data_genre, by="channelId") %>% 
+  inner_join(data_genre_cluster, by="channelId") %>% 
   ggplot(
     aes(
       x = cluster,
-      y = subscriberCount %>% log(10)
+      y = subscriberCount %>% log10
     )
   ) +
   geom_boxplot() +
   xlab("クラスタ") +
-  ylab("チャンネル登録者(対数)")
+  ylab("チャンネル登録者(対数)")+
+  coord_flip()
 ```
+
+### 活動ジャンルはチャンネル登録者に影響を与えるか
+
+```{r}
+data_test <- 
+  data_livers %>% 
+  inner_join(data_genre_cluster, by="channelId")
+
+pairwise.t.test(
+  data_test$subscriberCount %>% log10,
+  data_test$cluster,
+  p.adj = "bonf"
+)
+```
+
+- 活動ジャンルはチャンネル登録者に依らない
 
 ## 各ジャンルごとのコラボ希望度
 
 ### コラボ「5」登録率
+
 ```{r}
-data_genre %>% 
+data_genre_cluster %>% 
   left_join(data_collabo, by="channelId") %>% 
   mutate(collabo_registration = ifelse(is.na(collabo_level)|(collabo_level<=4),0,1)) %>% 
   select(cluster, collabo_registration) %>% 
@@ -398,14 +437,20 @@ data_genre %>%
       y = collabo_registration
     )
   ) +
-  geom_bar(stat="identity")
+  geom_bar(stat="identity") +
+  coord_flip()+
+  coord_flip()
 ```
+
+- ゲーム特化・お絵描きクラスタはコラボをしにくい
+- ギャンブル・TRPGクラスタはコラボに寛容
 
 # 得意なことのクラスタ分け
 
 ## 最適なクラスタ数を決める
 
 ### BIC
+
 ```{r}
 kmeansAIC <- function(fit){
   
@@ -428,6 +473,7 @@ print(res)
 ```
 
 ### 階層クラスター分析
+
 ```{r}
 result <- hclust(dist(d), method = "ward.D2")
 plot(as.dendrogram(result))
@@ -437,21 +483,37 @@ rect.hclust(result, k = 5)
 ## クラスタリングの実施
 
 ```{r}
-cluster = cutree(result, k=5)
+cluster = cutree(result, k=6)
+len = length(cluster)
+
+data_customer_count <-
+  data_customer %>%
+  pivot_longer(
+    cols     = -channelId,
+    names_to = "customer"
+  ) %>% 
+  select(-channelId) %>% 
+  group_by(customer) %>% 
+  summarize(count=sum(value))
 
 data_customer %>% 
   select(starts_with("customer")) %>% 
   mutate(cluster = cluster) %>% 
   pivot_longer(
     cols = -cluster,
-    names_to = "feature"
+    names_to = "customer"
   ) %>% 
-  group_by(cluster, feature) %>%
-  summarize(mean=mean(value)) %>% 
+  inner_join(
+    data_customer_count,
+    by = "customer"
+  ) %>% 
+  group_by(cluster, customer) %>%
+  summarize(weight=sum(value/count),n = n()) %>% 
+  mutate(rate = weight) %>% 
   ggplot(
     aes(
-      x = feature,
-      y = mean
+      x = customer,
+      y = rate
     )
   ) +
   geom_bar(stat="identity") +
@@ -460,50 +522,42 @@ data_customer %>%
   ) +
   facet_grid(
     cluster ~ .
-  )
+  ) +
+  ylim(0,1)
 ```
 
 ### 結果の解釈
 
-- k=2
-  - 企画・お笑い
-  - 一般的
-- k=3
-  - 企画・お笑い・トーク
-  - イラスト・2Dモデル
-  - 一般的
-- k=4
-  - 企画・お笑い・トーク
-  - イラスト・2Dモデル
-  - 歌
-  - 一般的
-- k=5
-  - 企画・お笑い・トーク
-  - イラスト・2Dモデル
-  - 歌
+- k=6
+  - 特技なし
+  - ゲーム
+  - お笑い・企画
+  - イラスト・モデリング
+  - 音楽・外国語
   - 動画編集
-  - 一般的
 
 ```{r}
 ### ジャンルのクラスタを保存
 
-f_cluster_name <- function(cluster_num){
-  if(cluster_num == 1){
-    return("1:企画・お笑い・トーク")
-  }else if(cluster_num == 3){
-    return("2:イラスト・2Dモデル")
+f_customer_cluster_name <- function(cluster_num){
+  if(cluster_num == 3){
+    return("1:特技なし")
+  }else if(cluster_num == 6){
+    return("2:ゲーム")
+  }else if(cluster_num == 1){
+    return("3:お笑い・企画")
+  }else if(cluster_num == 2){
+    return("4:イラスト・モデリング")
   }else if(cluster_num == 4){
-    return("3:歌")
-  }else if(cluster_num == 5){
-    return("4:動画編集")
+    return("5:音楽・外国語")
   }else{
-    return("5:一般的")
+    return("6:動画編集")
   }
 }
 
 #data_customer %>% 
-#  mutate(cluster = sapply(cluster,f_cluster_name)) %>% 
-#  write_csv("../csv/customer_cluster.csv")
+#  mutate(cluster = sapply(cluster,f_customer_cluster_name)) %>% 
+#  write_csv("../csv/feature/customer_cluster.csv")
 
 ```
 
@@ -511,13 +565,13 @@ f_cluster_name <- function(cluster_num){
 
 ```{r, include=FALSE}
 ## 得意なことデータの読み込み
-data_customer = read_csv("../csv/customer_cluster.csv", quote = '"') %>% distinct
+data_customer_cluster = read_csv("../csv/feature/customer_cluster.csv", quote = '"') %>% distinct
 ```
 
 ## 各クラスタの活動者数
 
 ```{r}
-data_customer %>% 
+data_customer_cluster %>% 
   ggplot(
     aes(
       x = cluster
@@ -525,23 +579,41 @@ data_customer %>%
   ) +
   geom_bar(stat="count") +
   xlab("クラスタ") +
-  ylab("配信者数")
+  ylab("配信者数") +
+  coord_flip()
 ```
 ## 各クラスタごとのチャンネル登録者数
 
 ```{r}
 data_livers %>% 
-  inner_join(data_customer, by="channelId") %>% 
+  inner_join(data_customer_cluster, by="channelId") %>% 
   ggplot(
     aes(
       x = cluster,
-      y = subscriberCount %>% log(10)
+      y = subscriberCount %>% log10
     )
   ) +
   geom_boxplot() +
+  coord_flip() +
   xlab("クラスタ") +
   ylab("チャンネル登録者(対数)")
 ```
+
+### 得意なことクラスタとチャンネル登録者は関連するか
+
+```{r}
+data_test <- 
+  data_livers %>% 
+  inner_join(data_customer_cluster, by="channelId")
+
+pairwise.t.test(
+  data_test$subscriberCount %>% log10,
+  data_test$cluster,
+  p.adj = "bonf"
+)
+```
+
+-- 得意なこととチャンネル登録者は関連がない
 
 # ショート動画分析
 
@@ -587,6 +659,7 @@ data_subscriber_and_short %>%
   ylab("チャンネル登録者(対数)")
 
 ```
+
 ### ショートの投稿頻度は登録者数に影響を与えるか？
 
 ```{r}
@@ -677,15 +750,16 @@ data_livers_with_buzz %>%
   xlab("バズった動画の有無") +
   ylab("チャンネル登録者(対数)")
 ```
-### 優位性の検定
+
+### 有意性の検定
 
 ```{r}
 
 data_test2 <-
   data_livers_with_buzz %>% 
   inner_join(data_gender, by="channelId") %>% 
-  select(-channelId) %>% 
-  pivot_longer(-log_subscriberCount, names_to = "gender") %>% 
+  select(-channelId, -title, -publishedAt) %>% 
+  pivot_longer(-subscriberCount, names_to = "gender") %>% 
   filter(value==1)
 
 t.test(
@@ -696,4 +770,3 @@ t.test(
 )
 ```
 - バズったShortの有無とチャンネル登録者の間に関連なし
-
