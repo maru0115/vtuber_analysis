@@ -22,6 +22,7 @@ library(Newdistns)
 library(rmutil)
 library(statmod)
 library(tidyverse)
+library(scales)
 
 # 関数定義
 f_subscriberClass = function(subscriberCount){
@@ -65,6 +66,63 @@ data_livers %>%
   geom_histogram()
 ```
 
+# チャンネル登録者の男女比の関係
+```{r}
+data_gender %>% 
+  mutate(
+    gender_other  = ifelse(gender_babiniku+gender_bisexual+gender_other>0,1,0),
+    gender_female = ifelse(gender_female+gender_tomgirl>0,1,0)
+  ) %>% 
+  select(channelId, gender_male, gender_female, gender_other) %>%
+  rename(
+    "男性"   = gender_male,
+    "女性"   = gender_female,
+    "その他" = gender_other
+  ) %>% 
+  pivot_longer(
+    cols = -channelId,
+    names_to = "gender"
+  ) %>% 
+  inner_join(
+    data_livers,
+    by="channelId"
+  ) %>% 
+  mutate(
+    subscriberClass = cut(subscriberCount %>% log10, breaks = c(-Inf,2.5,3,3.5,4,4.5,5,5.5,6,Inf))
+  ) %>% 
+  mutate(
+    subscriberClass = str_replace_all(subscriberClass, pattern=c(
+      "\\(-Inf,2.5]"   = "2",
+      "\\(2.5,3]"   = "2.5",
+      "\\(3,3.5]"   = "3",
+      "\\(3.5,4]"   = "3.5",
+      "\\(4,4.5]"   = "4",
+      "\\(4.5,5]"   = "4.5",
+      "\\(5,5.5]"   = "5",
+      "\\(5.5,6]"   = "5.5",
+      "\\(6,Inf]" = "6"
+    )),
+  ) %>% 
+  select(gender, value, subscriberClass) %>% 
+  #group_by(gender,subscriberClass) %>% 
+  #summarise(sum=sum(value)) %>% 
+  ggplot(
+    aes(
+      x = subscriberClass,
+      y = value,
+      fill = gender
+    )
+  ) +
+  geom_bar(
+    stat     = "identity",
+    position = "fill",
+  ) +
+  scale_y_continuous(labels = percent) +
+  ggtitle("チャンネル登録者別の男女比") +
+  xlab("チャンネル登録者(対数)") +
+  ylab("男女比(%)") +
+  labs(fill = "性別")
+```
 
 # 各特徴量ごとの活動人数
 

@@ -1,0 +1,296 @@
+---
+title: "description_live"
+output: html_document
+date: "2024-05-28"
+---
+
+```{r setup, include=FALSE}
+library(lemon)
+library(tidyverse)
+```
+
+```{r, include=FALSE}
+# データの読み込み
+data_video_genres = read_csv("../csv/video_genres.csv", quote = '"')
+
+# 海外勢のchannelId
+foreign_channelId =c(
+  "UCyKsg-57XC9pyHbP7v3kCPQ",
+  "UCFahBR2wixu0xOex84bXFvg",
+  "UC_ulAd_3TQIlLRAo5zNhnoQ",
+  "UChTI-WraqcTbKuSiG6zVQcw",
+  "UC9OgjjQe70k5NwLoyHaJ2Xg"
+)
+
+# 関数定義
+f_subscriberClass = function(subscriberCount){
+  if(subscriberCount<1000){
+    return("1:100台")
+  }else if(subscriberCount<10000){
+    return("2:1,000台")
+  }else if(subscriberCount<50000){
+    return("3:1~5万")
+  }else{
+    return("4:5万以上")
+  }
+}
+
+# データの読み込み
+data_video_genres = read_csv("../csv/video_genres.csv", quote = '"')   %>% distinct
+data_livers        =
+  read_csv("../csv/all_livers_info.csv", quote = '"') %>%
+  mutate(subscriberClass = subscriberCount %>% sapply(f_subscriberClass)) %>% 
+  filter(!(channelId %in% foreign_channelId)) %>% 
+  distinct
+```
+
+```{r}
+# データの整形
+data_video_genres <-
+  data_video_genres %>% 
+  filter(!(channelId %in% foreign_channelId)) %>% 
+  mutate(
+    chat         = ifelse(str_detect(genre,"雑談"),1,0),
+    watch_along  = ifelse(str_detect(genre,"同時視聴"),1,0),
+    work         = ifelse(str_detect(genre,"作業"),1,0),
+    sing         = ifelse(str_detect(genre,"歌"),1,0),
+    game         = ifelse(str_detect(genre,"ゲーム"),1,0),
+    game_classic = ifelse(str_detect(genre,"定番"),1,0),
+    game_app     = ifelse(str_detect(genre,"スマホ"),1,0),
+    game_horror  = ifelse(str_detect(genre,"ホラー"),1,0),
+    game_core    = ifelse(str_detect(genre,"コア"),1,0),
+    game_trend   = ifelse(str_detect(genre,"流行"),1,0),
+    game_fps     = ifelse(str_detect(genre,"FPS"),1,0),
+    game_table   = ifelse(str_detect(genre,"テーブル"),1,0),
+    mahjong      = ifelse(str_detect(genre,"麻雀"),1,0),
+    gamble       = ifelse(str_detect(genre,"ギャンブル"),1,0),
+    asmr         = ifelse(str_detect(genre,"ASMR"),1,0),
+    collabo      = ifelse(str_detect(genre,"コラボ"),1,0),
+    event        = ifelse(str_detect(genre,"企画"),1,0),
+  ) %>%
+  mutate(
+    game_sum   = game_classic + game_app + game_horror + game_core + game_trend + game_fps + game_table + mahjong + gamble,
+    game_core  = ifelse(game_core == 1 | (game == 1 & game_sum != 1),1,game_core),
+    other      = ifelse(is.na(chat) == 1,1,0)
+  ) %>% 
+  mutate_all(~ifelse(is.na(.),0,.)) %>% 
+  select(-genre, -game, -game_sum)
+```
+
+```{r}
+# 各ジャンルの動画を一回でも上げている配信者の数
+data_video_genres%>% 
+  select(-videoId,-title,-word_list) %>% 
+  pivot_longer(cols= -channelId, names_to="genre") %>% 
+  group_by(channelId,genre) %>% 
+  summarise(sum=sum(value),count=ifelse(sum(value)>0,1,0)) %>% 
+  ungroup() %>% 
+  ggplot(
+    aes(
+      x = genre,
+      y = count
+    )
+  ) + 
+  geom_bar(stat="identity") +
+  coord_flip()
+```
+
+```{r}
+# 各ジャンルの割合を算出
+data_livers_genres_sum <-
+  data_video_genres%>% 
+  select(-videoId,-title,-word_list) %>% 
+  group_by(channelId) %>% 
+  summarise_all(.funs = "sum") %>% 
+  ungroup()
+
+data_livers_genres_rate <-
+  data_video_genres_sum%>% 
+  mutate(sum = rowSums(.[2:18])) %>% 
+  mutate_if(.predicate = is.numeric, .funs = ~./sum) %>% 
+  select(-sum)
+```
+
+## 最適なクラスタ数を決める
+
+### BIC
+```{r}
+kmeansAIC <- function(fit){
+  
+  m <- ncol(fit$centers)
+  n <- length(fit$cluster)
+  k <- nrow(fit$centers)
+  D <- fit$tot.withinss
+  return(data.frame(AIC = D + 2*m*k,
+                    BIC = D + log(n)*m*k))
+}
+
+d <- data_livers_genres_rate %>% select(-channelId)
+res <- c()
+for (i in 2:15){
+  fit <- kmeans(d, i)
+  tmp <- kmeansAIC(fit)
+  res <- rbind(res, cbind(tmp, i))
+}
+print(res)
+```
+
+### エルボー図
+
+```{r}
+k.max <- 15
+wss <- sapply(1:k.max, 
+              function(k){kmeans(d, k, nstart = 50, iter.max = 15)$tot.withinss})
+plot(1:k.max, wss,
+     type="b", pch = 19, frame = FALSE, 
+     xlab="Number of clusters K",
+     ylab="Total within-clusters sum of squares")
+```
+
+### 階層クラスター分析
+
+```{r}
+result <- hclust(dist(d), method = "ward.D2")
+plot(as.dendrogram(result))
+rect.hclust(result, k = 7)
+```
+
+## クラスタリングの実施
+
+```{r}
+cluster = cutree(result, k=8)
+len = length(cluster)
+
+data_livers_genres_rate %>% 
+  select(-channelId) %>% 
+  mutate(cluster = cluster) %>%
+  pivot_longer(
+    cols = -cluster,
+    names_to  = "genre",
+    values_to = "rate"
+  ) %>% 
+  ggplot(
+    aes(
+      x = genre,
+      y = rate
+    )
+  ) +
+  facet_rep_wrap(.~cluster, ncol = 2, repeat.tick.labels = TRUE) +
+  geom_boxplot() +
+  coord_flip()
+```
+
+- k=8
+  - 歌
+    - 配信の5割ほどが歌配信
+  - トーク   
+    - 配信の4割ほどが雑談
+  - スマホゲーム
+    - 配信の3割ほどがスマホゲーム
+  - その他
+  - ASMR
+    - 5割ASMR, 1割雑談
+  - 定番ゲーム
+    - 配信の5割が定番ゲーム(ポケモン、モンハンなど)
+  - コアゲームとトーク
+    - 2割コアゲーム、2割雑談
+  - コアゲームメイン
+    - 9割がコアなゲーム
+    
+```{r}
+f_genre_name = function(genre_num){
+  if(genre_num == 1){return("歌")}
+  else if(genre_num == 2){return("雑談")}
+  else if(genre_num == 3){return("スマホゲーム")}
+  else if(genre_num == 4){return("その他")}
+  else if(genre_num == 5){return("ASMR")}
+  else if(genre_num == 6){return("定番ゲーム")}
+  else if(genre_num == 7){return("コアゲームとトーク")}
+  else{return("コアゲームメイン")}
+}
+```
+
+
+```{r}
+# クラスタの特徴を数字で見る
+#data_livers_genres_rate %>% 
+#  select(-channelId) %>% 
+#  mutate(cluster = cluster) %>% 
+#  group_by(cluster) %>% 
+#  summarize_all(.funs="mean") %>% 
+#  View
+```
+
+
+```{r}
+# 各クラスタの配信者数
+data_livers_genres_rate %>%
+  mutate(
+    cluster = cluster,
+    cluster = sapply(cluster,f_genre_name)
+  )%>% 
+  inner_join(
+    data_gender, by="channelId"
+  ) %>% 
+  select(cluster,gender_male,starts_with("gender_")) %>% 
+  pivot_longer(
+    cols     = -cluster,
+    names_to = "gender"
+  ) %>% 
+  mutate_at(
+    .vars = vars("gender"),
+    .funs =　~ifelse(
+      .=="gender_female","女性",ifelse(
+      .=="gender_male","男性",
+      "その他"
+    ))
+    )%>% 
+  filter(value == 1) %>% 
+  ggplot(
+    aes(
+      x = cluster %>% as.character(),
+      fill = gender
+    )
+  ) +
+  geom_bar() +
+  coord_flip() +
+  ggtitle("各ジャンルの配信者数")+
+  labs(fill = "性別") +
+  xlab("配信者数")+
+  ylab("ジャンル")
+```
+
+```{r}
+# 各クラスタの配信者数
+data_livers_genres_rate %>% 
+  mutate(
+    cluster = cluster,
+    cluster = sapply(cluster,f_genre_name)
+  )%>% 
+  inner_join(
+    data_livers, by="channelId"
+  ) %>% 
+  select(cluster, subscriberCount) %>% 
+  ggplot(
+    aes(
+      x = cluster %>% as.character,
+      y = subscriberCount %>% log10
+    )
+  ) +
+  geom_boxplot() +
+  coord_flip() +
+  ggtitle("各ジャンルの配信者の登録者数")+
+  ylab("配信者数(対数)")+
+  xlab("ジャンル")
+```
+
+# その他の配信ってどんなの？
+```{r}
+data_video_genres %>% 
+  filter(other == 1) %>% 
+  View
+```
+
+
+
+
